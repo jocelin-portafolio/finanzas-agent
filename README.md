@@ -73,6 +73,15 @@ python evals/run_evals.py      # agente real contra casos.yaml (cuesta dinero)
 Cada caso parte de una BD limpia con semilla y verifica: herramientas llamadas o prohibidas,
 contenido de la respuesta, **estado final de la BD vía SQL** y número de pasos.
 
+**En CI** se separan las dos señales:
+
+| Workflow | Cuándo corre | Por qué |
+|---|---|---|
+| `CI` (ruff + pytest) | Cada push y PR | Determinista, rápido y gratis |
+| `Evals` (agente real) | Cuando cambian `src/`, `evals/` o `pyproject.toml`, o a mano (`gh workflow run Evals`) | Cuesta tokens y no es determinista: se mide cuando cambia el comportamiento del agente |
+
+Sin el secreto `ANTHROPIC_API_KEY` (por ejemplo en forks), los evals se omiten en lugar de fallar.
+
 ### Resultados
 
 <!-- Pega aquí la salida de evals/resultados/ultimo.json -->

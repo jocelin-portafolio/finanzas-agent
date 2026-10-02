@@ -1,0 +1,77 @@
+name: Evals
+
+# Los evals llaman a la API de Claude: cuestan dinero y no son deterministas.
+# Corren solo cuando cambia algo que afecta al comportamiento del agente,
+# o a mano desde Actions → Evals → Run workflow (`gh workflow run Evals`).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"                       # prompt, bucle del agente, tools MCP, validación
+      - "evals/**"                     # casos y harness
+      - "pyproject.toml"               # versiones del SDK / MCP
+      - ".github/workflows/evals.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "evals/**"
+      - "pyproject.toml"
+      - ".github/workflows/evals.yml"
+
+# Un push nuevo cancela la corrida anterior de la misma rama: no se paga dos veces.
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev
+
+      # Sin secreto (forks o repo sin configurar) se omite en vez de fallar.
+      - name: Comprobar API key
+        id: clave
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::notice::ANTHROPIC_API_KEY no configurada: se omiten los evals."
+            echo "hay=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "hay=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # No gastar tokens si el código está roto.
+      - name: Tests
+        if: steps.clave.outputs.hay == 'true'
+        run: uv run pytest -q
+
+      - name: Evals
+        if: steps.clave.outputs.hay == 'true'
+        run: uv run python evals/run_evals.py
+
+      - name: Resumen
+        if: always() && steps.clave.outputs.hay == 'true'
+        run: |
+          if [ -f evals/resultados/ultimo.json ]; then
+            {
+              echo "## Resultados de evals"
+              echo '```json'
+              python -c "import json; print(json.dumps(json.load(open('evals/resultados/ultimo.json'))['resumen'], indent=2, ensure_ascii=False))"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.clave.outputs.hay == 'true'
+        with:
+          name: evals
+          path: evals/resultados/
+          if-no-files-found: ignore
